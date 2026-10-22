@@ -1,0 +1,257 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Rack status</title>
+<link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 16 16'%3E%3Crect x='1' y='2' width='14' height='5' rx='1' fill='%232e7d4f'/%3E%3Crect x='1' y='9' width='14' height='5' rx='1' fill='%23b3362b'/%3E%3C/svg%3E">
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=IBM+Plex+Mono:wght@400;500&family=IBM+Plex+Sans:wght@400;500;600;700&display=swap" rel="stylesheet">
+<style>
+  :root {
+    --paper: #f2f3f1;
+    --ink: #1c1f23;
+    --ink-soft: #5c636b;
+    --rule: #d6d9d4;
+    --track: #e3e5e1;
+    --free: #2e7d4f;
+    --partial: #b97309;
+    --occupied: #b3362b;
+    --unknown: #878d96;
+    --free-wash: #e2efe7;
+    --partial-wash: #f5ead6;
+    --occupied-wash: #f4e0dd;
+    --unknown-wash: #e7e9ec;
+  }
+  * { box-sizing: border-box; margin: 0; }
+  body {
+    background: var(--paper);
+    color: var(--ink);
+    font-family: "IBM Plex Sans", system-ui, sans-serif;
+    line-height: 1.45;
+  }
+  .wrap { max-width: 880px; margin: 0 auto; padding: 48px 24px 64px; }
+
+  header { display: flex; align-items: baseline; justify-content: space-between; gap: 16px; }
+  header h1 { font-size: 1rem; font-weight: 600; letter-spacing: 0; }
+  .meta { color: var(--ink-soft); font-size: 0.85rem; display: flex; align-items: baseline; gap: 12px; }
+  button#refresh {
+    font: inherit; font-size: 0.85rem; font-weight: 500;
+    color: var(--ink); background: none;
+    border: 1.5px solid var(--ink); border-radius: 2px;
+    padding: 4px 12px; cursor: pointer;
+  }
+  button#refresh:hover { background: var(--ink); color: var(--paper); }
+  button#refresh:focus-visible { outline: 3px solid var(--partial); outline-offset: 2px; }
+  button#refresh[disabled] { opacity: 0.5; cursor: wait; }
+
+  .answer {
+    margin-top: 40px;
+    font-size: clamp(1.7rem, 4.5vw, 2.6rem);
+    font-weight: 700;
+    line-height: 1.2;
+    letter-spacing: -0.015em;
+    max-width: 20ch;
+  }
+  .answer .free { color: var(--free); }
+  .answer .partial { color: var(--partial); }
+  .answer .occupied { color: var(--occupied); }
+  .answer .unknown { color: var(--unknown); }
+
+  .rack { margin-top: 44px; border-top: 1.5px solid var(--ink); }
+  .server {
+    display: grid;
+    grid-template-columns: 148px 1fr;
+    gap: 8px 24px;
+    padding: 20px 0 20px 20px;
+    border-bottom: 1px solid var(--rule);
+    border-left: 7px solid var(--unknown);
+  }
+  .server.free { border-left-color: var(--free); }
+  .server.partial { border-left-color: var(--partial); }
+  .server.occupied { border-left-color: var(--occupied); }
+
+  .ident .name { font-size: 1.45rem; font-weight: 700; letter-spacing: -0.01em; }
+  .state {
+    display: inline-block; margin-top: 4px;
+    font-size: 0.85rem; font-weight: 600;
+    padding: 1px 8px; border-radius: 2px;
+  }
+  .state.free { color: var(--free); background: var(--free-wash); }
+  .state.partial { color: var(--partial); background: var(--partial-wash); }
+  .state.occupied { color: var(--occupied); background: var(--occupied-wash); }
+  .state.unknown { color: var(--unknown); background: var(--unknown-wash); }
+  .ident .sub { margin-top: 10px; color: var(--ink-soft); font-size: 0.8rem; }
+
+  .gpus { display: flex; flex-direction: column; gap: 10px; justify-content: center; }
+  .gpu {
+    display: grid;
+    grid-template-columns: 52px 1fr 150px minmax(60px, auto);
+    align-items: center;
+    gap: 14px;
+    font-family: "IBM Plex Mono", monospace;
+    font-size: 0.8rem;
+  }
+  .gpu .tag { color: var(--ink-soft); }
+  .bar { height: 14px; background: var(--track); border-radius: 2px; overflow: hidden; }
+  .bar .fill { height: 100%; border-radius: 2px; transition: width 0.6s ease; }
+  .gpu.free .fill { background: var(--free); }
+  .gpu.occupied .fill { background: var(--occupied); }
+  .gpu.cpu-ok .fill { background: var(--ink-soft); }
+  .gpu.cpu-hot .fill { background: var(--occupied); }
+  .gpu.cpu-ok .who, .gpu.cpu-hot .who { color: var(--ink-soft); font-weight: 400; }
+  .gpu .mem { text-align: right; white-space: nowrap; color: var(--ink); }
+  .gpu .who { font-family: "IBM Plex Sans", system-ui, sans-serif; font-size: 0.82rem; font-weight: 600; }
+  .gpu.occupied .who { color: var(--occupied); }
+  .gpu.free .who { color: var(--ink-soft); font-weight: 400; }
+  .trouble { align-self: center; color: var(--unknown); font-size: 0.88rem; max-width: 52ch; }
+
+  footer { margin-top: 28px; color: var(--ink-soft); font-size: 0.8rem; }
+
+  @media (max-width: 620px) {
+    .server { grid-template-columns: 1fr; }
+    .gpu { grid-template-columns: 44px 1fr 110px; }
+    .gpu .who { grid-column: 2 / -1; margin-top: -4px; }
+  }
+  @media (prefers-reduced-motion: reduce) {
+    .bar .fill { transition: none; }
+  }
+</style>
+</head>
+<body>
+<div class="wrap">
+  <header>
+    <h1>Rack status</h1>
+    <div class="meta">
+      <span id="updated">connecting…</span>
+      <button id="refresh" type="button">Refresh now</button>
+    </div>
+  </header>
+
+  <p class="answer" id="answer" aria-live="polite">Checking the rack…</p>
+
+  <div class="rack" id="rack"></div>
+
+  <footer>Checks a6, a61, a62 and a63 over SSH every 30 seconds. A GPU counts as occupied above 1 GiB of memory or 15% utilization.</footer>
+</div>
+
+<script>
+const HOST_ORDER = ["a6", "a61", "a62", "a63"];
+const STATE_WORD = { free: "Free", partial: "One GPU free", occupied: "Occupied", unknown: "Unreachable" };
+let lastUpdated = null;
+
+function gib(mib) { return (mib / 1024).toFixed(mib >= 10240 ? 0 : 1); }
+
+function answerSentence(servers) {
+  const by = s => servers.filter(x => x.status === s).map(x => x.host);
+  const join = h => h.length === 1 ? h[0] : h.slice(0, -1).join(", ") + " and " + h.at(-1);
+  const parts = [];
+  const free = by("free"), partial = by("partial"), occ = by("occupied"), unk = by("unknown");
+  if (free.length) parts.push(`<span class="free">${join(free)} ${free.length > 1 ? "are" : "is"} free.</span>`);
+  if (partial.length) parts.push(`<span class="partial">${join(partial)} ${partial.length > 1 ? "have" : "has"} a free GPU.</span>`);
+  if (!free.length && !partial.length && occ.length) parts.push(`<span class="occupied">Every reachable server is occupied.</span>`);
+  else if (occ.length) parts.push(`<span class="occupied">${join(occ)} ${occ.length > 1 ? "are" : "is"} occupied.</span>`);
+  if (unk.length) parts.push(`<span class="unknown">${join(unk)} ${unk.length > 1 ? "are" : "is"} unreachable.</span>`);
+  return parts.join(" ") || "No servers configured.";
+}
+
+function renderServer(s) {
+  const row = document.createElement("section");
+  row.className = `server ${s.status}`;
+
+  const ident = document.createElement("div");
+  ident.className = "ident";
+  const sub = [];
+  if (s.uptime) { const m = s.uptime.match(/up\s+([^,]+)/); if (m) sub.push("up " + m[1].trim()); }
+  if (s.load != null && !s.cores) sub.push("load " + s.load.toFixed(2));
+  ident.innerHTML = `
+    <div class="name">${s.host}</div>
+    <span class="state ${s.status}">${STATE_WORD[s.status]}</span>
+    ${sub.length ? `<div class="sub">${sub.join(", ")}</div>` : ""}`;
+  row.appendChild(ident);
+
+  if (s.gpus && s.gpus.length) {
+    const list = document.createElement("div");
+    list.className = "gpus";
+    for (const g of s.gpus) {
+      const pct = Math.max(1, Math.round(100 * g.memory_used / g.memory_total));
+      const gpu = document.createElement("div");
+      gpu.className = `gpu ${g.status}`;
+      gpu.innerHTML = `
+        <span class="tag">GPU ${g.index}</span>
+        <div class="bar" role="meter" aria-label="GPU ${g.index} memory" aria-valuenow="${pct}" aria-valuemin="0" aria-valuemax="100">
+          <div class="fill" style="width:${pct}%"></div>
+        </div>
+        <span class="mem">${gib(g.memory_used)} / ${gib(g.memory_total)} GiB, ${g.utilization}%</span>
+        <span class="who">${g.users.length ? g.users.join(", ") : (g.status === "free" ? "idle" : "")}</span>`;
+      list.appendChild(gpu);
+    }
+    if (s.load != null && s.cores) {
+      const ratio = s.load / s.cores;
+      const pct = Math.max(1, Math.min(100, Math.round(100 * ratio)));
+      const cpu = document.createElement("div");
+      cpu.className = `gpu ${ratio >= 0.9 ? "cpu-hot" : "cpu-ok"}`;
+      cpu.innerHTML = `
+        <span class="tag">CPU</span>
+        <div class="bar" role="meter" aria-label="CPU load" aria-valuenow="${pct}" aria-valuemin="0" aria-valuemax="100">
+          <div class="fill" style="width:${pct}%"></div>
+        </div>
+        <span class="mem">${s.load.toFixed(2)} / ${s.cores} cores</span>
+        <span class="who">${pct}%</span>`;
+      list.appendChild(cpu);
+    }
+    row.appendChild(list);
+  } else {
+    const msg = document.createElement("p");
+    msg.className = "trouble";
+    msg.textContent = s.error || "No GPU data returned.";
+    row.appendChild(msg);
+  }
+  return row;
+}
+
+function render(data) {
+  if (!data.updated) return; // first poll still in flight
+  lastUpdated = data.updated;
+  const servers = [...data.servers].sort((a, b) => HOST_ORDER.indexOf(a.host) - HOST_ORDER.indexOf(b.host));
+  document.getElementById("answer").innerHTML = answerSentence(servers);
+  const rack = document.getElementById("rack");
+  rack.replaceChildren(...servers.map(renderServer));
+  tickClock();
+}
+
+function tickClock() {
+  const el = document.getElementById("updated");
+  if (!lastUpdated) { el.textContent = "waiting for first poll…"; return; }
+  const age = Math.max(0, Math.round(Date.now() / 1000 - lastUpdated));
+  el.textContent = age < 5 ? "updated just now" : `updated ${age}s ago`;
+}
+
+async function fetchStatus() {
+  try {
+    const res = await fetch("/api/status");
+    render(await res.json());
+  } catch {
+    document.getElementById("updated").textContent = "dashboard server not responding";
+  }
+}
+
+document.getElementById("refresh").addEventListener("click", async (e) => {
+  const btn = e.currentTarget;
+  btn.disabled = true;
+  btn.textContent = "Checking…";
+  try {
+    const res = await fetch("/api/refresh", { method: "POST" });
+    render(await res.json());
+  } catch { /* clock line already reports connectivity */ }
+  btn.disabled = false;
+  btn.textContent = "Refresh now";
+});
+
+fetchStatus();
+setInterval(fetchStatus, 10000);
+setInterval(tickClock, 1000);
+</script>
+</body>
+</html>
