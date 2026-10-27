@@ -3,7 +3,7 @@
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
-<title>Rack status</title>
+<title>GPU monitor</title>
 <link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 16 16'%3E%3Crect x='1' y='2' width='14' height='5' rx='1' fill='%232e7d4f'/%3E%3Crect x='1' y='9' width='14' height='5' rx='1' fill='%23b3362b'/%3E%3C/svg%3E">
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
@@ -25,6 +25,7 @@
     --unknown-wash: #e7e9ec;
   }
   * { box-sizing: border-box; margin: 0; }
+  [hidden] { display: none !important; }
   body {
     background: var(--paper);
     color: var(--ink);
@@ -34,7 +35,15 @@
   .wrap { max-width: 880px; margin: 0 auto; padding: 48px 24px 64px; }
 
   header { display: flex; align-items: baseline; justify-content: space-between; gap: 16px; }
-  header h1 { font-size: 1rem; font-weight: 600; letter-spacing: 0; }
+  .tabs { display: flex; gap: 20px; }
+  .tab {
+    font: inherit; font-size: 1rem; font-weight: 600;
+    background: none; border: none; cursor: pointer;
+    color: var(--ink-soft); padding: 0 0 4px;
+    border-bottom: 2.5px solid transparent;
+  }
+  .tab.active { color: var(--ink); border-bottom-color: var(--ink); }
+  .tab:focus-visible { outline: 3px solid var(--partial); outline-offset: 2px; }
   .meta { color: var(--ink-soft); font-size: 0.85rem; display: flex; align-items: baseline; gap: 12px; }
   button#refresh {
     font: inherit; font-size: 0.85rem; font-weight: 500;
@@ -107,6 +116,42 @@
   .gpu.free .who { color: var(--ink-soft); font-weight: 400; }
   .trouble { align-self: center; color: var(--unknown); font-size: 0.88rem; max-width: 52ch; }
 
+  .nodes { display: flex; flex-wrap: wrap; gap: 6px; margin-top: 2px; }
+  .nodechip {
+    font-family: "IBM Plex Mono", monospace; font-size: 0.72rem;
+    padding: 2px 7px; border-radius: 2px;
+    background: var(--track); color: var(--ink-soft);
+  }
+  .nodechip.has-free { background: var(--free-wash); color: var(--free); }
+  .nodechip.off { text-decoration: line-through; opacity: 0.75; }
+
+  .group { margin: 30px 0 0; font-size: 0.95rem; font-weight: 600; }
+  .group:first-child { margin-top: 36px; }
+  .group + .rack { margin-top: 10px; }
+  .histrow {
+    display: grid;
+    grid-template-columns: 110px 1fr 150px 110px;
+    gap: 14px; align-items: baseline;
+    padding: 9px 0 9px 20px;
+    border-bottom: 1px solid var(--rule);
+    font-size: 0.82rem;
+  }
+  .hstate { font-weight: 600; }
+  .hstate.free { color: var(--free); }
+  .hstate.occupied { color: var(--occupied); }
+  .hstate.partial { color: var(--partial); }
+  .hstate.unknown { color: var(--unknown); }
+  .histrow .hname { overflow-wrap: anywhere; }
+  .histrow .hname .jid { color: var(--ink-soft); }
+  .histrow .hmeta, .histrow .hend {
+    font-family: "IBM Plex Mono", monospace; font-size: 0.75rem;
+    color: var(--ink-soft); white-space: nowrap;
+  }
+  @media (max-width: 620px) {
+    .histrow { grid-template-columns: 90px 1fr; }
+    .histrow .hmeta, .histrow .hend { display: none; }
+  }
+
   footer { margin-top: 28px; color: var(--ink-soft); font-size: 0.8rem; }
 
   @media (max-width: 620px) {
@@ -122,18 +167,42 @@
 <body>
 <div class="wrap">
   <header>
-    <h1>Rack status</h1>
-    <div class="meta">
+    <nav class="tabs" aria-label="Pages">
+      <button class="tab active" id="tab-rack" type="button">Rack</button>
+      <button class="tab" id="tab-slurm" type="button">aisurrey</button>
+      <button class="tab" id="tab-jobs" type="button">my jobs</button>
+    </nav>
+    <div class="meta" id="meta-rack">
       <span id="updated">connecting…</span>
       <button id="refresh" type="button">Refresh now</button>
     </div>
+    <div class="meta" id="meta-slurm" hidden>
+      <span id="slurm-updated">not loaded yet</span>
+      <button id="slurm-refresh" type="button">Refresh now</button>
+    </div>
+    <div class="meta" id="meta-jobs" hidden>
+      <span id="jobs-updated">not loaded yet</span>
+      <button id="jobs-refresh" type="button">Refresh now</button>
+    </div>
   </header>
 
-  <p class="answer" id="answer" aria-live="polite">Checking the rack…</p>
+  <div id="view-rack">
+    <p class="answer" id="answer" aria-live="polite">Checking the rack…</p>
+    <div class="rack" id="rack"></div>
+    <footer>Checks a6, a61, a62 and a63 over SSH every 30 seconds. A GPU counts as occupied above 1 GiB of memory or 15% utilization.</footer>
+  </div>
 
-  <div class="rack" id="rack"></div>
+  <div id="view-slurm" hidden>
+    <p class="answer" id="slurm-answer" aria-live="polite">Not loaded yet.</p>
+    <div class="rack" id="partitions"></div>
+    <footer>Partitions reported by sinfo on aisurrey, counted over schedulable nodes only (drained and down nodes excluded). Loads once when you open this page; after that, only the refresh button asks again.</footer>
+  </div>
 
-  <footer>Checks a6, a61, a62 and a63 over SSH every 30 seconds. A GPU counts as occupied above 1 GiB of memory or 15% utilization.</footer>
+  <div id="view-jobs" hidden>
+    <p class="answer" id="jobs-answer" aria-live="polite">Not loaded yet.</p>
+    <div id="jobs-list"></div>
+    <footer>Your own jobs on aisurrey from squeue, plus everything that finished in the last 24 hours from sacct. Loads once when you open this page; after that, only the refresh button asks again.</footer>
+  </div>
 </div>
 
 <script>
@@ -249,9 +318,262 @@ document.getElementById("refresh").addEventListener("click", async (e) => {
   btn.textContent = "Refresh now";
 });
 
+// ---- aisurrey (SLURM) page: fetched only on first open or manual refresh ----
+let slurmLoaded = false;
+
+function slurmSentence(parts) {
+  const totalFree = parts.reduce((n, p) => n + p.gpus_free, 0);
+  const withFree = parts.filter(p => p.gpus_free > 0).length;
+  const down = parts.filter(p => p.status === "down").length;
+  if (!parts.length) return `<span class="unknown">No data from aisurrey.</span>`;
+  const bits = [];
+  if (totalFree) bits.push(`<span class="free">${totalFree} GPUs free</span> in ${withFree} of ${parts.length} partitions.`);
+  else bits.push(`<span class="occupied">No free GPUs on aisurrey right now.</span>`);
+  if (down) bits.push(`<span class="unknown">${down} partition${down > 1 ? "s" : ""} offline.</span>`);
+  return bits.join(" ");
+}
+
+const PART_WORD = { free: null, full: "Full", down: "Offline" };
+
+function renderPartition(p) {
+  const color = p.status === "free" ? "free" : p.status === "full" ? "occupied" : "unknown";
+  const row = document.createElement("section");
+  row.className = `server ${color}`;
+
+  const ident = document.createElement("div");
+  ident.className = "ident";
+  const word = PART_WORD[p.status] || `${p.gpus_free} GPU${p.gpus_free > 1 ? "s" : ""} free`;
+  ident.innerHTML = `
+    <div class="name">${p.name}${p.default ? "*" : ""}</div>
+    <span class="state ${color}">${word}</span>
+    <div class="sub">${p.gpu_type}</div>`;
+  row.appendChild(ident);
+
+  const right = document.createElement("div");
+  right.className = "gpus";
+  if (p.gpus_avail_total > 0) {
+    const pct = Math.max(1, Math.round(100 * p.gpus_used / p.gpus_avail_total));
+    const agg = document.createElement("div");
+    agg.className = `gpu ${p.status === "full" ? "occupied" : "free"}`;
+    agg.innerHTML = `
+      <span class="tag">GPUs</span>
+      <div class="bar" role="meter" aria-label="GPUs allocated in ${p.name}" aria-valuenow="${pct}" aria-valuemin="0" aria-valuemax="100">
+        <div class="fill" style="width:${pct}%"></div>
+      </div>
+      <span class="mem">${p.gpus_used} / ${p.gpus_avail_total} in use</span>
+      <span class="who">${p.gpus_offline ? `+${p.gpus_offline} offline` : ""}</span>`;
+    right.appendChild(agg);
+  } else {
+    const msg = document.createElement("p");
+    msg.className = "trouble";
+    msg.textContent = "Every node in this partition is drained or down.";
+    right.appendChild(msg);
+  }
+  const chips = document.createElement("div");
+  chips.className = "nodes";
+  for (const n of p.nodes) {
+    const chip = document.createElement("span");
+    chip.className = "nodechip" + (!n.available ? " off" : n.gpus_free > 0 ? " has-free" : "");
+    chip.title = `${n.state}, ${n.gpus_free} of ${n.gpus_total} GPUs free, ${n.cpus_idle} of ${n.cpus_total} CPUs free`;
+    chip.textContent = !n.available ? n.name : `${n.name} · ${n.gpus_free} GPU · ${n.cpus_idle} CPU`;
+    chips.appendChild(chip);
+  }
+  right.appendChild(chips);
+  row.appendChild(right);
+  return row;
+}
+
+function renderSlurm(data) {
+  const up = document.getElementById("slurm-updated");
+  if (!data.updated) {
+    document.getElementById("slurm-answer").innerHTML =
+      `<span class="unknown">aisurrey did not answer.</span>`;
+    up.textContent = data.error || "fetch failed";
+    return;
+  }
+  const parts = [...data.partitions].sort((a, b) =>
+    (a.status === "down") - (b.status === "down") || b.gpus_free - a.gpus_free);
+  document.getElementById("slurm-answer").innerHTML = slurmSentence(parts);
+  document.getElementById("partitions").replaceChildren(...parts.map(renderPartition));
+  const when = new Date(data.updated * 1000).toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" });
+  up.textContent = (data.error ? `refresh failed (${data.error}), showing data from ` : "updated ") + when;
+}
+
+async function loadSlurm(force) {
+  const btn = document.getElementById("slurm-refresh");
+  btn.disabled = true;
+  btn.textContent = "Checking…";
+  if (!slurmLoaded) document.getElementById("slurm-answer").textContent = "Asking aisurrey…";
+  try {
+    const res = await fetch(force ? "/api/slurm/refresh" : "/api/slurm", force ? { method: "POST" } : undefined);
+    renderSlurm(await res.json());
+    slurmLoaded = true;
+  } catch {
+    document.getElementById("slurm-updated").textContent = "dashboard server not responding";
+  }
+  btn.disabled = false;
+  btn.textContent = "Refresh now";
+}
+
+// ---- my jobs page: the user's own queue + last-24h history, on demand ----
+let jobsLoaded = false;
+
+function fmtClock(iso) {
+  const d = new Date(iso);
+  if (isNaN(d)) return iso;
+  const sameDay = d.toDateString() === new Date().toDateString();
+  const hm = d.toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" });
+  return sameDay ? hm : d.toLocaleDateString([], { month: "short", day: "numeric" }) + " " + hm;
+}
+
+function resources(job) {
+  const r = [];
+  if (job.gpus) r.push(`${job.gpus} GPU`);
+  if (job.cpus) r.push(`${job.cpus} CPU`);
+  if (job.mem) r.push(job.mem);
+  return r.join(", ");
+}
+
+const HIST_COLOR = {
+  COMPLETED: "free", FAILED: "occupied", NODE_FAIL: "occupied", OUT_OF_MEMORY: "occupied",
+  TIMEOUT: "partial", PREEMPTED: "partial", CANCELLED: "unknown",
+};
+
+function jobsSentence(d) {
+  const bits = [];
+  if (d.running.length) {
+    const gpus = d.running.reduce((n, j) => n + j.gpus, 0);
+    bits.push(`<span class="free">${d.running.length} job${d.running.length > 1 ? "s" : ""} running</span> on ${gpus} GPU${gpus !== 1 ? "s" : ""}.`);
+  }
+  if (d.pending.length) bits.push(`<span class="partial">${d.pending.length} pending.</span>`);
+  if (!bits.length) bits.push(`<span class="unknown">Nothing running or pending.</span>`);
+  return bits.join(" ");
+}
+
+function renderRunningJob(j) {
+  const row = document.createElement("section");
+  row.className = "server free";
+  const pct = j.elapsed_s != null && j.limit_s
+    ? Math.max(1, Math.min(100, Math.round(100 * j.elapsed_s / j.limit_s))) : 1;
+  row.innerHTML = `
+    <div class="ident">
+      <div class="name">${j.name}</div>
+      <span class="state free">Running</span>
+      <div class="sub">#${j.id}, ${j.partition}, ${j.where}</div>
+    </div>
+    <div class="gpus">
+      <div class="gpu free">
+        <span class="tag">time</span>
+        <div class="bar" role="meter" aria-label="elapsed of time limit" aria-valuenow="${pct}" aria-valuemin="0" aria-valuemax="100">
+          <div class="fill" style="width:${pct}%"></div>
+        </div>
+        <span class="mem">${j.elapsed} / ${j.limit}</span>
+        <span class="who"></span>
+      </div>
+      <div class="nodes"><span class="nodechip has-free">${resources(j)}</span></div>
+    </div>`;
+  return row;
+}
+
+function renderPendingJob(j) {
+  const row = document.createElement("section");
+  row.className = "server partial";
+  row.innerHTML = `
+    <div class="ident">
+      <div class="name">${j.name}</div>
+      <span class="state partial">Pending</span>
+      <div class="sub">#${j.id}, ${j.partition}</div>
+    </div>
+    <p class="trouble">Waiting on ${j.where || "the scheduler"}. Asking for ${resources(j)}, time limit ${j.limit}. Submitted ${fmtClock(j.submitted)}.</p>`;
+  return row;
+}
+
+function renderJobs(data) {
+  const up = document.getElementById("jobs-updated");
+  if (!data.updated) {
+    document.getElementById("jobs-answer").innerHTML = `<span class="unknown">aisurrey did not answer.</span>`;
+    up.textContent = data.error || "fetch failed";
+    return;
+  }
+  document.getElementById("jobs-answer").innerHTML = jobsSentence(data);
+  const out = [];
+  const section = (title) => {
+    const h = document.createElement("h2");
+    h.className = "group";
+    h.textContent = title;
+    out.push(h);
+  };
+  const rackOf = (rows) => {
+    const div = document.createElement("div");
+    div.className = "rack";
+    div.replaceChildren(...rows);
+    out.push(div);
+  };
+  if (data.running.length) { section(`Running (${data.running.length})`); rackOf(data.running.map(renderRunningJob)); }
+  if (data.pending.length) { section(`Pending (${data.pending.length})`); rackOf(data.pending.map(renderPendingJob)); }
+  if (data.history.length) {
+    section("Finished in the last 24 hours");
+    const hist = document.createElement("div");
+    hist.className = "hist";
+    for (const j of data.history) {
+      const row = document.createElement("div");
+      row.className = "histrow";
+      row.innerHTML = `
+        <span class="hstate ${HIST_COLOR[j.state] || "unknown"}">${j.state.toLowerCase()}</span>
+        <span class="hname">${j.name} <span class="jid">#${j.id}</span></span>
+        <span class="hmeta">${j.gpus ? j.gpus + " GPU, " : ""}ran ${j.elapsed}</span>
+        <span class="hend">ended ${fmtClock(j.end)}</span>`;
+      hist.appendChild(row);
+    }
+    out.push(hist);
+  }
+  document.getElementById("jobs-list").replaceChildren(...out);
+  const when = new Date(data.updated * 1000).toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" });
+  up.textContent = (data.error ? `refresh failed (${data.error}), showing data from ` : "updated ") + when;
+}
+
+async function loadJobs(force) {
+  const btn = document.getElementById("jobs-refresh");
+  btn.disabled = true;
+  btn.textContent = "Checking…";
+  if (!jobsLoaded) document.getElementById("jobs-answer").textContent = "Asking aisurrey…";
+  try {
+    const res = await fetch(force ? "/api/jobs/refresh" : "/api/jobs", force ? { method: "POST" } : undefined);
+    renderJobs(await res.json());
+    jobsLoaded = true;
+  } catch {
+    document.getElementById("jobs-updated").textContent = "dashboard server not responding";
+  }
+  btn.disabled = false;
+  btn.textContent = "Refresh now";
+}
+
+// ---- view switching ----
+const VIEWS = ["rack", "slurm", "jobs"];
+
+function switchView(name) {
+  if (!VIEWS.includes(name)) name = "rack";
+  for (const v of VIEWS) {
+    document.getElementById("view-" + v).hidden = v !== name;
+    document.getElementById("meta-" + v).hidden = v !== name;
+    document.getElementById("tab-" + v).classList.toggle("active", v === name);
+  }
+  history.replaceState(null, "", "#" + name);
+  if (name === "slurm" && !slurmLoaded) loadSlurm(false);
+  if (name === "jobs" && !jobsLoaded) loadJobs(false);
+}
+
+window.addEventListener("hashchange", () => switchView(location.hash.slice(1)));
+for (const v of VIEWS) {
+  document.getElementById("tab-" + v).addEventListener("click", () => switchView(v));
+}
+document.getElementById("slurm-refresh").addEventListener("click", () => loadSlurm(true));
+document.getElementById("jobs-refresh").addEventListener("click", () => loadJobs(true));
+
 fetchStatus();
 setInterval(fetchStatus, 10000);
 setInterval(tickClock, 1000);
+if (location.hash && location.hash !== "#rack") switchView(location.hash.slice(1));
 </script>
 </body>
 </html>

@@ -18,13 +18,24 @@ python3 -m unittest tests.test_collector.TestClassify  # run one test class
 
 ## Architecture
 
-Three pieces, one data flow:
+Three pages served by one app: "Rack" (the four lab servers, auto-polled), "aisurrey" (SLURM partitions) and "my jobs" (the user's own SLURM queue + 24 h history). The two SLURM pages are fetched only on demand — by design they must never auto-refresh.
+
+Rack page pieces:
 
 - `collector.py` — all remote logic. `REMOTE_SCRIPT` is a single SSH round-trip per host that emits marker-delimited sections (GPU stats, GPU processes, uptime, pid→user map); `parse_probe_output()` turns it into a dict, `classify_gpu()`/`classify_server()` apply the occupancy rules (GPU occupied at ≥1 GiB memory or ≥15% util; server free only if all GPUs free, else partial/occupied; unreachable → unknown). `StatusCache` polls all hosts concurrently on a 30 s background thread and holds the latest snapshot; `refresh_now()` wakes the loop for an immediate poll.
-- `app.py` — stdlib `ThreadingHTTPServer` bound to 127.0.0.1:8787. Routes: `/` (static page), `GET /api/status` (cached snapshot), `POST /api/refresh` (blocking immediate poll).
-- `static/index.html` — single-file page (inline CSS/JS, IBM Plex via Google Fonts). Fetches `/api/status` every 10 s. The hero element is a computed plain-English sentence answering "which server is free"; below it, one row per server in rack-elevation style with a state-colored spine, per-GPU memory bars, and the users occupying each GPU.
+- `app.py` — stdlib `ThreadingHTTPServer` bound to 127.0.0.1:8787. Routes: `/` (static page), `GET /api/status` (cached snapshot), `POST /api/refresh` (blocking immediate poll), plus the same GET/POST-refresh pair for `/api/slurm` and `/api/jobs` (cached-or-first-fetch / forced fetch). All responses send `Cache-Control: no-cache`.
+- `static/index.html` — single-file page (inline CSS/JS, IBM Plex via Google Fonts), two views toggled by tabs and `#rack`/`#slurm` hashes. The rack view fetches `/api/status` every 10 s; its hero is a computed plain-English sentence answering "which server is free", then one row per server in rack-elevation style with a state-colored spine, per-GPU memory bars, users per GPU, and a CPU load bar (load/cores).
 
-The parsing/classification functions in `collector.py` are pure — test changes there via `tests/test_collector.py` with captured probe text, no SSH needed.
+aisurrey (SLURM) page:
+
+- `slurm.py` — runs one read-only `sinfo -N -O "...Gres,GresUsed"` on the `aisurrey` alias, groups (node, partition) lines into partitions, counts free GPUs over schedulable nodes only (drain/drng/down nodes contribute `gpus_offline`, never "free"), prettifies GPU type names. `SlurmCache.get(force=)` fetches only on first request or explicit refresh — no background polling; a failed refresh keeps the stale snapshot and sets `error`.
+- The slurm view loads once when the tab is first opened; after that only its Refresh button re-fetches. Partition rows reuse the rack row styling: aggregate GPUs-in-use bar plus per-node chips (green = has free GPUs, struck-through = drained/down).
+
+my jobs page:
+
+- `jobs.py` — one SSH round-trip running `squeue -u $USER` (queue, pending reasons) and `sacct -X -P -S now-24hours` (history + TRES). Gotcha: on this cluster `squeue %b` (tres-per-node) returns `N/A`, so GPU counts come from sacct's AllocTRES/ReqTRES via an id→gpus map (array jobs fall back to the base id before `_`). Same on-demand `JobsCache` model as `SlurmCache`.
+
+The parsing/classification functions in `collector.py`, `slurm.py` and `jobs.py` are pure — test changes there via `tests/` with captured probe text, no SSH needed.
 
 ## Server Topology (from ~/.ssh/config)
 

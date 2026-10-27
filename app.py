@@ -9,26 +9,38 @@ import os
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 
 from collector import StatusCache
+from jobs import JobsCache
+from slurm import SlurmCache
 
 BIND = "127.0.0.1"  # private tool: never expose beyond this machine
 PORT = 8787
 STATIC_DIR = os.path.join(os.path.dirname(os.path.abspath(__file__)), "static")
 
 cache = StatusCache()
+slurm_cache = SlurmCache()
+jobs_cache = JobsCache()
 
 
 class Handler(BaseHTTPRequestHandler):
     def do_GET(self):
-        if self.path == "/" or self.path.startswith("/index.html"):
+        if self.path.split("?")[0] in ("/", "/index.html"):
             self._serve_index()
         elif self.path.startswith("/api/status"):
             self._serve_json(cache.snapshot())
+        elif self.path.startswith("/api/slurm"):
+            self._serve_json(slurm_cache.get())
+        elif self.path.startswith("/api/jobs"):
+            self._serve_json(jobs_cache.get())
         else:
             self.send_error(404)
 
     def do_POST(self):
         if self.path == "/api/refresh":
             self._serve_json(cache.refresh_now())
+        elif self.path == "/api/slurm/refresh":
+            self._serve_json(slurm_cache.get(force=True))
+        elif self.path == "/api/jobs/refresh":
+            self._serve_json(jobs_cache.get(force=True))
         else:
             self.send_error(404)
 
@@ -38,6 +50,7 @@ class Handler(BaseHTTPRequestHandler):
         self.send_response(200)
         self.send_header("Content-Type", "text/html; charset=utf-8")
         self.send_header("Content-Length", str(len(body)))
+        self.send_header("Cache-Control", "no-cache")
         self.end_headers()
         self.wfile.write(body)
 
@@ -46,6 +59,7 @@ class Handler(BaseHTTPRequestHandler):
         self.send_response(200)
         self.send_header("Content-Type", "application/json")
         self.send_header("Content-Length", str(len(body)))
+        self.send_header("Cache-Control", "no-cache")
         self.end_headers()
         self.wfile.write(body)
 
