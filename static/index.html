@@ -189,7 +189,7 @@
   <div id="view-rack">
     <p class="answer" id="answer" aria-live="polite">Checking the rack…</p>
     <div class="rack" id="rack"></div>
-    <footer>Checks a6, a61, a62 and a63 over SSH every 30 seconds. A GPU counts as occupied above 1 GiB of memory or 15% utilization.</footer>
+    <footer>Checks a6000server1, ulws070, clws00272 and ulws183 over SSH every 30 seconds. A GPU counts as occupied above 1 GiB of memory or 15% utilization.</footer>
   </div>
 
   <div id="view-slurm" hidden>
@@ -213,7 +213,7 @@ let lastUpdated = null;
 function gib(mib) { return (mib / 1024).toFixed(mib >= 10240 ? 0 : 1); }
 
 function answerSentence(servers) {
-  const by = s => servers.filter(x => x.status === s).map(x => x.host);
+  const by = s => servers.filter(x => x.status === s).map(x => x.name || x.host);
   const join = h => h.length === 1 ? h[0] : h.slice(0, -1).join(", ") + " and " + h.at(-1);
   const parts = [];
   const free = by("free"), partial = by("partial"), occ = by("occupied"), unk = by("unknown");
@@ -235,7 +235,7 @@ function renderServer(s) {
   if (s.uptime) { const m = s.uptime.match(/up\s+([^,]+)/); if (m) sub.push("up " + m[1].trim()); }
   if (s.load != null && !s.cores) sub.push("load " + s.load.toFixed(2));
   ident.innerHTML = `
-    <div class="name">${s.host}</div>
+    <div class="name">${s.name || s.host}</div>
     <span class="state ${s.status}">${STATE_WORD[s.status]}</span>
     ${sub.length ? `<div class="sub">${sub.join(", ")}</div>` : ""}`;
   row.appendChild(ident);

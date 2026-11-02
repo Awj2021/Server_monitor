@@ -12,6 +12,15 @@ from concurrent.futures import ThreadPoolExecutor
 
 HOSTS = ["a6", "a61", "a62", "a63"]
 
+# Real machine names, shown in the UI; SSH still goes through the aliases
+# above (they carry the right User/ProxyJump from ~/.ssh/config).
+MACHINE_NAMES = {
+    "a6": "a6000server1",
+    "a61": "ulws070",
+    "a62": "clws00272",
+    "a63": "ulws183",
+}
+
 POLL_INTERVAL = 30  # seconds between background polls
 SSH_TIMEOUT = 25  # hard cap per host (two hops can be slow)
 
@@ -117,6 +126,7 @@ def classify_server(gpu_statuses):
 
 
 def probe_host(host):
+    name = MACHINE_NAMES.get(host, host)
     try:
         result = subprocess.run(
             ["ssh", "-o", "BatchMode=yes", "-o", "ConnectTimeout=10", host, REMOTE_SCRIPT],
@@ -125,16 +135,17 @@ def probe_host(host):
             timeout=SSH_TIMEOUT,
         )
     except subprocess.TimeoutExpired:
-        return {"host": host, "status": "unknown", "error": "SSH timed out", "gpus": [],
-                "uptime": "", "load": None, "cores": None}
+        return {"host": host, "name": name, "status": "unknown", "error": "SSH timed out",
+                "gpus": [], "uptime": "", "load": None, "cores": None}
     except OSError as exc:
-        return {"host": host, "status": "unknown", "error": str(exc), "gpus": [],
-                "uptime": "", "load": None, "cores": None}
+        return {"host": host, "name": name, "status": "unknown", "error": str(exc),
+                "gpus": [], "uptime": "", "load": None, "cores": None}
 
     if result.returncode != 0:
         error = result.stderr.strip().splitlines()
         return {
             "host": host,
+            "name": name,
             "status": "unknown",
             "error": error[-1] if error else f"ssh exited {result.returncode}",
             "gpus": [],
@@ -146,6 +157,7 @@ def probe_host(host):
         gpu["status"] = classify_gpu(gpu)
     return {
         "host": host,
+        "name": name,
         "status": classify_server([g["status"] for g in info["gpus"]]),
         "gpus": info["gpus"],
         "uptime": info["uptime"],
